@@ -7,6 +7,7 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/typed/apps/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"path/filepath"
@@ -53,11 +54,14 @@ func (kc *KubeClient) GetPods() (*apiv1.PodList, error) {
 
 func int32Ptr(i int32) *int32 { return &i }
 
-func (kc *KubeClient) CreateDeployment() error {
-	deploymentsClient := kc.clientSet.AppsV1().Deployments(apiv1.NamespaceDefault)
+func (kc *KubeClient) DeploymentClient() v1.DeploymentInterface {
+	return kc.clientSet.AppsV1().Deployments(apiv1.NamespaceDefault)
+}
+func (kc *KubeClient) CreateDeployment(deploymentName string) error {
+	deploymentsClient := kc.DeploymentClient()
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "arc-diagram-server-kafka",
+			Name: deploymentName,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: int32Ptr(1),
@@ -75,6 +79,17 @@ func (kc *KubeClient) CreateDeployment() error {
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
+							Name:  "zookeeper-server",
+							Image: "wurstmeister/zookeeper",
+							Ports: []apiv1.ContainerPort{
+								{
+									Name:          "zookeeper-port",
+									Protocol:      apiv1.ProtocolTCP,
+									ContainerPort: 2181,
+								},
+							},
+						},
+						{
 							Name:  "kafka-server",
 							Image: "wurstmeister/kafka",
 							Ports: []apiv1.ContainerPort{
@@ -82,6 +97,16 @@ func (kc *KubeClient) CreateDeployment() error {
 									Name:          "kafka-port",
 									Protocol:      apiv1.ProtocolTCP,
 									ContainerPort: 9092,
+								},
+							},
+							Env: []apiv1.EnvVar{
+								{
+									Name:  "KAFKA_ZOOKEEPER_CONNECT",
+									Value: "localhost:2181",
+								},
+								{
+									Name:  "KAFKA_LISTENERS",
+									Value: "PLAINTEXT://:9092",
 								},
 							},
 						},

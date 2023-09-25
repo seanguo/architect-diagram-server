@@ -12,8 +12,24 @@ const (
 )
 
 type Message struct {
-	ID        string    `json:"id"`
-	Type      Type      `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	Content   string    `json:"content"`
+	ID        string                 `json:"id"`
+	Type      Type                   `json:"type"`
+	Timestamp time.Time              `json:"timestamp"`
+	Content   map[string]interface{} `json:"content"`
+}
+
+type CommandType string
+
+const (
+	CREATE  CommandType = "create"
+	CONNECT CommandType = "connect"
+	DESTROY CommandType = "destroy"
+	EXECUTE CommandType = "execute"
+)
+
+type Command struct {
+	Type   CommandType       `json:"type"`
+	Source string            `json:"source"`
+	Target string            `json:"target"`
+	Params map[string]string `json:"params"`
 }

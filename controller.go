@@ -1,13 +1,17 @@
 package main
 
 import (
-	"com.architectdiagram/m/driver"
-	"com.architectdiagram/m/transport"
 	"encoding/json"
-	"github.com/gorilla/websocket"
-	"go.uber.org/zap"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
+
+	// "com.architectdiagram/m/driver"
+	"com.architectdiagram/m/node"
+	"com.architectdiagram/m/transport"
+	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 var l *zap.SugaredLogger
@@ -26,20 +30,23 @@ func init() {
 }
 
 type Controller struct {
-	driverClient *driver.KubeClient
+	// driverClient *driver.KubeClient
+	nodesManager *node.Manager
 }
 
 func New() *Controller {
-	return &Controller{}
+	return &Controller{
+		nodesManager: node.NewManager(),
+	}
 }
 
 func (c *Controller) Start() {
 	// validate connection to default driven system(etc. minikube)
-	c.driverClient = driver.NewKubeClient()
-	_, err := c.driverClient.GetPods()
-	if err != nil {
-		log.Fatalf("can't connecto minikube driver: %v", err)
-	}
+	//c.driverClient = driver.NewKubeClient()
+	//_, err := c.driverClient.GetPods()
+	//if err != nil {
+	//	log.Fatalf("can't connecto minikube driver: %v", err)
+	//}
 
 	// start the Websocket server
 	http.HandleFunc("/commands", c.process)
@@ -69,7 +76,7 @@ func (c *Controller) process(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case transport.COMMAND:
 			l.Infof("got command from front end: %v", msg)
-			c.handleCommand(msg)
+			c.handleCommand(msg, conn)
 		case transport.REPORT:
 			l.Infof("got report from front end: %v", msg)
 		default:
@@ -96,32 +103,99 @@ func (c *Controller) process(w http.ResponseWriter, r *http.Request) {
 
 // handles the command received from frontend via Websocket connection
 // need to support batch command handling on import(TODO)
-func (c *Controller) handleCommand(command *transport.Message) {
+func (c *Controller) handleCommand(command *transport.Message, conn *websocket.Conn) {
 	//sent to internal Kafka topic (as event sourcing, TODO)
-	c.processCommand(command)
+	c.processCommand(command, conn)
+}
+
+func sendReport(content string, conn *websocket.Conn) error {
+	log.Println(fmt.Sprintf("writing message: %s", content))
+	marshal, err := json.Marshal(&transport.Message{
+		Type:      transport.REPORT,
+		Timestamp: time.Now(),
+		Content: map[string]interface{}{
+			"content": content,
+		},
+	})
+	if err != nil {
+		log.Println("marshall:", err)
+		return err
+	}
+	err = conn.WriteMessage(websocket.TextMessage, marshal)
+	if err != nil {
+		log.Println("write message:", err)
+	}
+	return err
 }
 
 // process command received from Kafka
-func (c *Controller) processCommand(command *transport.Message) {
-	// create resource in the driven system
-	switch command.Content {
-	case "list pods":
+func (c *Controller) processCommand(message *transport.Message, conn *websocket.Conn) {
+	cmd := &transport.Command{}
+	marshal, err := json.Marshal(message.Content)
+	if err != nil {
+		log.Println("decode command content failed:", err)
+		return
+	}
+	err = json.Unmarshal(marshal, cmd)
+	if err != nil {
+		log.Println("decode command failed:", err)
+		return
+	}
+	switch cmd.Type {
+	case transport.CONNECT:
 		{
-			pods, err := c.driverClient.GetPods()
-			if err != nil {
-				l.Error("write:", err)
-				return
+			snode := c.nodesManager.Get(cmd.Source)
+			if snode == nil {
+				_ = sendReport(fmt.Sprintf("can't find source node %s", cmd.Source), conn)
 			}
-			for _, pod := range pods.Items {
-				l.Infof("got pod: %v", pod)
+			tnode := c.nodesManager.Get(cmd.Target)
+			if tnode == nil {
+				_ = sendReport(fmt.Sprintf("can't find target node %s", cmd.Target), conn)
 			}
+			l.Infof("connecting source node[%s] to target node[%s]", cmd.Source, cmd.Target)
+			snode.OnConnect(tnode)
 		}
-	case "create pod":
+	case transport.CREATE:
 		{
-			err := c.driverClient.CreateDeployment()
+			t := node.Type(cmd.Params["nodeType"])
+			fmt.Println("creating " + t)
+			n := node.New(t, cmd.Target)
+			c.nodesManager.Add(n)
+			switch t {
+			case node.KAFKA_SERVER:
+				n.Start()
+			}
+			//deployName := "arc-diagram-server-kafka"
+			//err := c.driverClient.CreateDeployment(deployName)
+			//if err != nil {
+			//	errStr := fmt.Sprintf("create pod failed: %s", err)
+			//	l.Error(errStr)
+			//	_ = sendReport(errStr, conn)
+			//} else {
+			//	go func() {
+			//		ticker := time.NewTicker(time.Second * 5)
+			//		defer ticker.Stop()
+			//		for range ticker.C {
+			//			fmt.Print("每隔5秒执行任务")
+			//			get, err2 := c.driverClient.DeploymentClient().Get(context.TODO(), deployName, metav1.GetOptions{})
+			//			if err2 != nil {
+			//				log.Println("get deployment failed:", err)
+			//			}
+			//			report := fmt.Sprintf("deployment status: %s", get.Status)
+			//			_ = sendReport(report, conn)
+			//		}
+			//	}()
+			//}
+		}
+	case transport.EXECUTE:
+		{
+			node := c.nodesManager.Get(cmd.Target)
+			l.Infof("found node %v by ID", node)
+			err := node.Execute()
 			if err != nil {
-				l.Error("create pod failed:", err)
-				return
+				_ = sendReport(err.Error(), conn)
+			} else {
+				_ = sendReport("", conn)
 			}
 		}
 	}
@@ -143,8 +217,20 @@ func (*Controller) Stop() {
 }
 
 func main() {
-	c := &Controller{}
+	c := New()
 	defer c.Stop()
 
 	c.Start()
 }
+
+//func main() {
+//	addr := "localhost:9092"
+//	topic := "test"
+//	//producer := component.NewKafkaProducer(addr, )
+//	//defer producer.Close()
+//	//producer.Produce("test1")
+//
+//	consumer := component.NewKafkaConsumer(addr, topic)
+//	defer consumer.Close()
+//	consumer.Consume()
+//}
