@@ -32,6 +32,7 @@ const (
 )
 
 type Node interface {
+	NodeEventSource
 	Start()
 	Stop()
 	OnConnect(node Node) error
@@ -39,12 +40,26 @@ type Node interface {
 	GetID() string
 }
 
+type NodeEventListener interface {
+	OnEvent(event string, eventSource string)
+}
+
+type NodeEventSource interface {
+	AddEventListener(listener NodeEventListener)
+}
+
 type BaseNode struct {
-	ID string `json:"id"`
+	ID             string `json:"id"`
+	eventListeners []NodeEventListener
 }
 
 func (k *BaseNode) GetID() string {
 	return k.ID
+}
+
+func (k *BaseNode) AddEventListener(listener NodeEventListener) {
+	l.Infof("adding %v to node[%s]", listener, k.ID)
+	k.eventListeners = append(k.eventListeners, listener)
 }
 
 type KafkaProducer struct {
@@ -63,16 +78,18 @@ func (k *KafkaProducer) Stop() {
 }
 
 func (k *KafkaProducer) Execute() error {
+	l.Infof("producer is executed")
 	if k.producer == nil {
 		return errors.New("producer is not connected to server")
 	}
+	l.Infof("producer is producing")
 	return k.producer.Produce("test1")
 }
 
 func (k *KafkaProducer) OnConnect(node Node) error {
 	var err error
 	if k.producer != nil {
-		err = errors.New("Kafka producer is already connected")
+		err = errors.New("producer is already connected")
 		l.Errorf("%s", err)
 		return err
 	}
@@ -98,6 +115,10 @@ func (k *KafkaConsumer) Start() {
 	go func() {
 		for msg := range k.messages {
 			l.Infof("Consumer[%s] consumed: %s", k.ID, msg)
+			for _, listener := range k.eventListeners {
+				l.Infof("consumer[%s] is notifying listener[%v]", k.ID, listener)
+				listener.OnEvent(msg, k.ID)
+			}
 		}
 	}()
 	go func() {
@@ -112,6 +133,7 @@ func (k *KafkaConsumer) Start() {
 			}
 		}
 	}()
+	l.Infof("conumser[%s] is started", k.ID)
 }
 
 func (k *KafkaConsumer) Stop() {
@@ -124,7 +146,7 @@ func (k *KafkaConsumer) Execute() error {
 
 func (k *KafkaConsumer) OnConnect(node Node) error {
 	if k.consumer != nil {
-		err := errors.New("Kafka consumer is already connected")
+		err := errors.New("consumer is already connected")
 		l.Errorf("%s", err)
 		return err
 	}
@@ -170,13 +192,15 @@ func New(t Type, id string) Node {
 	case KAFKA_PRODUCER:
 		return &KafkaProducer{
 			BaseNode: BaseNode{
-				ID: id,
+				ID:             id,
+				eventListeners: make([]NodeEventListener, 0),
 			},
 		}
 	case KAFKA_CONSUMER:
 		return &KafkaConsumer{
 			BaseNode: BaseNode{
-				ID: id,
+				ID:             id,
+				eventListeners: make([]NodeEventListener, 0),
 			},
 			messages: make(chan string, 1),
 			done:     make(chan bool),
@@ -184,7 +208,8 @@ func New(t Type, id string) Node {
 	case KAFKA_SERVER:
 		return &KafkaServer{
 			BaseNode: BaseNode{
-				ID: id,
+				ID:             id,
+				eventListeners: make([]NodeEventListener, 0),
 			},
 		}
 	}

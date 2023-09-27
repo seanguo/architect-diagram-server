@@ -32,6 +32,7 @@ func init() {
 type Controller struct {
 	// driverClient *driver.KubeClient
 	nodesManager *node.Manager
+	conn         *websocket.Conn
 }
 
 func New() *Controller {
@@ -59,6 +60,7 @@ func (c *Controller) process(w http.ResponseWriter, r *http.Request) {
 		log.Print("upgrade:", err)
 		return
 	}
+	c.conn = conn
 	defer conn.Close()
 	for {
 		_, message, err := conn.ReadMessage()
@@ -108,9 +110,10 @@ func (c *Controller) handleCommand(command *transport.Message, conn *websocket.C
 	c.processCommand(command, conn)
 }
 
-func sendReport(content string, conn *websocket.Conn) error {
-	log.Println(fmt.Sprintf("writing message: %s", content))
+func sendReport(content string, conn *websocket.Conn, id string) error {
+	log.Printf("writing message: %s\n", content)
 	marshal, err := json.Marshal(&transport.Message{
+		ID:        id,
 		Type:      transport.REPORT,
 		Timestamp: time.Now(),
 		Content: map[string]interface{}{
@@ -146,11 +149,13 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 		{
 			snode := c.nodesManager.Get(cmd.Source)
 			if snode == nil {
-				_ = sendReport(fmt.Sprintf("can't find source node %s", cmd.Source), conn)
+				_ = sendReport(fmt.Sprintf("can't find source node %s", cmd.Source), conn, cmd.Source)
+				return
 			}
 			tnode := c.nodesManager.Get(cmd.Target)
 			if tnode == nil {
-				_ = sendReport(fmt.Sprintf("can't find target node %s", cmd.Target), conn)
+				_ = sendReport(fmt.Sprintf("can't find target node %s", cmd.Target), conn, cmd.Target)
+				return
 			}
 			l.Infof("connecting source node[%s] to target node[%s]", cmd.Source, cmd.Target)
 			snode.OnConnect(tnode)
@@ -164,6 +169,8 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 			switch t {
 			case node.KAFKA_SERVER:
 				n.Start()
+			case node.KAFKA_CONSUMER:
+				n.AddEventListener(c)
 			}
 			//deployName := "arc-diagram-server-kafka"
 			//err := c.driverClient.CreateDeployment(deployName)
@@ -190,12 +197,16 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 	case transport.EXECUTE:
 		{
 			node := c.nodesManager.Get(cmd.Target)
+			if node == nil {
+				_ = sendReport("can't find node: "+cmd.Target, conn, "")
+				return
+			}
 			l.Infof("found node %v by ID", node)
 			err := node.Execute()
 			if err != nil {
-				_ = sendReport(err.Error(), conn)
+				_ = sendReport(err.Error(), conn, node.GetID())
 			} else {
-				_ = sendReport("", conn)
+				_ = sendReport("", conn, node.GetID())
 			}
 		}
 	}
@@ -203,6 +214,10 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 	// drive resource to do action
 
 	// or destroy resource (TODO resource cleanup mechanism)
+}
+
+func (c *Controller) OnEvent(event string, eventSource string) {
+	_ = sendReport(event, c.conn, eventSource)
 }
 
 // process report of resources in driven system from Kafka(e.g. progress report from Kafka Java cosonsumer)
