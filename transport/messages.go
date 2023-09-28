@@ -25,6 +25,7 @@ const (
 	CONNECT CommandType = "connect"
 	DESTROY CommandType = "destroy"
 	EXECUTE CommandType = "execute"
+	UPDATE  CommandType = "update"
 )
 
 type Command struct {

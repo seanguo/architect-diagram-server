@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/segmentio/kafka-go"
 	"html/template"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
 
-	"com.architectdiagram/m/driver"
+	"github.com/segmentio/kafka-go"
+
 	"com.architectdiagram/m/report"
 	"com.architectdiagram/m/transport"
 	"github.com/gorilla/websocket"
@@ -45,13 +45,7 @@ func echo(w http.ResponseWriter, r *http.Request) {
 			log.Println("decode:", err)
 			break
 		}
-		kubeClient := driver.NewKubeClient()
-		pods, err := kubeClient.GetPods()
-		if err != nil {
-			log.Println("write:", err)
-			break
-		}
-		marshal, err := json.Marshal(pods)
+		marshal, err := json.Marshal(msg)
 		if err != nil {
 			log.Println("marshall:", err)
 			break

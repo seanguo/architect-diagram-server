@@ -27,8 +27,9 @@ const (
 	KAFKA_SERVER   Type = "kafka_server"
 )
 const (
-	DEFAULT_KAFKA_ADDRESS string = "localhost:9092"
-	DEFAULT_KAFKA_TOPIC   string = "arc_diagrams"
+	DEFAULT_KAFKA_ADDRESS        string = "localhost:9092"
+	DEFAULT_KAFKA_TOPIC          string = "arc_diagrams"
+	DEFAULT_KAFKA_CONSUMER_GROUP string = "arc_consumer_group"
 )
 
 type Node interface {
@@ -38,6 +39,7 @@ type Node interface {
 	OnConnect(node Node) error
 	Execute() error
 	GetID() string
+	Update(propName, propValue string)
 }
 
 type NodeEventListener interface {
@@ -56,6 +58,10 @@ type BaseNode struct {
 func (k *BaseNode) GetID() string {
 	return k.ID
 }
+
+// func (k *BaseNode) Update(propName, propValue string) {
+// 	l.Infof("updating node[%s]'s %s to %s", k.ID, propName, propValue)
+// }
 
 func (k *BaseNode) AddEventListener(listener NodeEventListener) {
 	l.Infof("adding %v to node[%s]", listener, k.ID)
@@ -86,6 +92,9 @@ func (k *KafkaProducer) Execute() error {
 	return k.producer.Produce("test1")
 }
 
+func (k *KafkaProducer) Update(propName, propValue string) {
+}
+
 func (k *KafkaProducer) OnConnect(node Node) error {
 	var err error
 	if k.producer != nil {
@@ -109,9 +118,11 @@ type KafkaConsumer struct {
 	consumer *component.KafkaConsumer
 	messages chan string
 	done     chan bool
+	props    map[string]string
 }
 
 func (k *KafkaConsumer) Start() {
+	k.messages = make(chan string, 1)
 	go func() {
 		for msg := range k.messages {
 			l.Infof("Consumer[%s] consumed: %s", k.ID, msg)
@@ -137,11 +148,25 @@ func (k *KafkaConsumer) Start() {
 }
 
 func (k *KafkaConsumer) Stop() {
+	l.Infof("consumer[%s] is stopping", k.ID)
 	k.done <- true
+	k.consumer.Close()
+	l.Infof("consumer[%s] is stopped", k.ID)
 }
 
 func (k *KafkaConsumer) Execute() error {
 	return nil
+}
+
+func (k *KafkaConsumer) Update(propName, propValue string) {
+	l.Infof("consumer is updating node[%s]'s %s to %s", k.ID, propName, propValue)
+	if k.consumer != nil {
+		k.Stop()
+		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC, propValue)
+		l.Infof("consumer reconnected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
+		k.Start()
+	}
+	k.props[propName] = propValue
 }
 
 func (k *KafkaConsumer) OnConnect(node Node) error {
@@ -152,7 +177,7 @@ func (k *KafkaConsumer) OnConnect(node Node) error {
 	}
 	ks, ok := node.(*KafkaServer)
 	if ok {
-		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
+		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC, k.props["consumerGroup"])
 		l.Infof("consumer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
 		k.Start()
 	} else {
@@ -187,6 +212,9 @@ func (k *KafkaServer) OnConnect(node Node) error {
 	}
 }
 
+func (k *KafkaServer) Update(propName, propValue string) {
+}
+
 func New(t Type, id string) Node {
 	switch t {
 	case KAFKA_PRODUCER:
@@ -197,14 +225,17 @@ func New(t Type, id string) Node {
 			},
 		}
 	case KAFKA_CONSUMER:
-		return &KafkaConsumer{
+		consumer := &KafkaConsumer{
 			BaseNode: BaseNode{
 				ID:             id,
 				eventListeners: make([]NodeEventListener, 0),
 			},
-			messages: make(chan string, 1),
-			done:     make(chan bool),
+			// messages: make(chan string, 1),
+			done:  make(chan bool, 1),
+			props: make(map[string]string),
 		}
+		consumer.props["consumerGroup"] = DEFAULT_KAFKA_CONSUMER_GROUP
+		return consumer
 	case KAFKA_SERVER:
 		return &KafkaServer{
 			BaseNode: BaseNode{

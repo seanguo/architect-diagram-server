@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	// "com.architectdiagram/m/driver"
 	"com.architectdiagram/m/node"
 	"com.architectdiagram/m/transport"
 	"github.com/gorilla/websocket"
@@ -84,22 +83,6 @@ func (c *Controller) process(w http.ResponseWriter, r *http.Request) {
 		default:
 			l.Errorf("got unkown message: %v", msg)
 		}
-		//kubeClient := driver.NewKubeClient()
-		//pods, err := kubeClient.GetPods()
-		//if err != nil {
-		//	log.Println("write:", err)
-		//	break
-		//}
-		//marshal, err := json.Marshal(pods)
-		//if err != nil {
-		//	log.Println("marshall:", err)
-		//	break
-		//}
-		//err = conn.WriteMessage(mt, marshal)
-		//if err != nil {
-		//	log.Println("write:", err)
-		//	break
-		//}
 	}
 }
 
@@ -172,27 +155,17 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 			case node.KAFKA_CONSUMER:
 				n.AddEventListener(c)
 			}
-			//deployName := "arc-diagram-server-kafka"
-			//err := c.driverClient.CreateDeployment(deployName)
-			//if err != nil {
-			//	errStr := fmt.Sprintf("create pod failed: %s", err)
-			//	l.Error(errStr)
-			//	_ = sendReport(errStr, conn)
-			//} else {
-			//	go func() {
-			//		ticker := time.NewTicker(time.Second * 5)
-			//		defer ticker.Stop()
-			//		for range ticker.C {
-			//			fmt.Print("每隔5秒执行任务")
-			//			get, err2 := c.driverClient.DeploymentClient().Get(context.TODO(), deployName, metav1.GetOptions{})
-			//			if err2 != nil {
-			//				log.Println("get deployment failed:", err)
-			//			}
-			//			report := fmt.Sprintf("deployment status: %s", get.Status)
-			//			_ = sendReport(report, conn)
-			//		}
-			//	}()
-			//}
+		}
+	case transport.UPDATE:
+		{
+			node := c.nodesManager.Get(cmd.Target)
+			if node == nil {
+				_ = sendReport("can't find node: "+cmd.Target, conn, "")
+				return
+			}
+			consumerGroup := cmd.Params["consumerGroup"]
+			l.Infof("updating node[%s] consumerGroup to %s", node.GetID(), consumerGroup)
+			node.Update("consumerGroup", consumerGroup)
 		}
 	case transport.EXECUTE:
 		{
