@@ -118,6 +118,7 @@ type KafkaConsumer struct {
 	consumer *component.KafkaConsumer
 	messages chan string
 	done     chan bool
+	shutdown chan bool
 	props    map[string]string
 }
 
@@ -138,6 +139,7 @@ func (k *KafkaConsumer) Start() {
 			case <-k.done:
 				l.Infof("Consumer[%s] is quitting", k.ID)
 				close(k.messages)
+				k.shutdown <- true
 				return
 			default:
 				k.messages <- k.consumer.Consume()
@@ -151,6 +153,7 @@ func (k *KafkaConsumer) Stop() {
 	l.Infof("consumer[%s] is stopping", k.ID)
 	k.done <- true
 	k.consumer.Close()
+	<-k.shutdown
 	l.Infof("consumer[%s] is stopped", k.ID)
 }
 
@@ -231,8 +234,9 @@ func New(t Type, id string) Node {
 				eventListeners: make([]NodeEventListener, 0),
 			},
 			// messages: make(chan string, 1),
-			done:  make(chan bool, 1),
-			props: make(map[string]string),
+			done:     make(chan bool, 1),
+			shutdown: make(chan bool),
+			props:    make(map[string]string),
 		}
 		consumer.props["consumerGroup"] = DEFAULT_KAFKA_CONSUMER_GROUP
 		return consumer
