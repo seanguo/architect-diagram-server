@@ -152,7 +152,7 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 			switch t {
 			case node.KAFKA_SERVER:
 				n.Start()
-			case node.KAFKA_CONSUMER:
+			case node.KAFKA_CONSUMER, node.RABBIT_CONSUMER:
 				n.AddEventListener(c)
 			}
 		}
