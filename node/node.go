@@ -29,6 +29,9 @@ const (
 	RABBIT_PRODUCER Type = "rabbit_producer"
 	RABBIT_SERVER   Type = "rabbit_server"
 	RABBIT_CONSUMER Type = "rabbit_consumer"
+
+	REST_PRODUCER Type = "rest_producer"
+	REST_SERVER   Type = "rest_server"
 )
 
 type Node interface {
