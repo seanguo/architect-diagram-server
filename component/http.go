@@ -15,9 +15,9 @@ type HttpClient struct {
 }
 
 func (c *HttpClient) Produce(content string) error {
-	var jsonData = []byte(`{
-		"content": content,
-	}`)
+	var jsonData = []byte(fmt.Sprintf(`{
+		"content": %s,
+	}`, content))
 	l.Infof("sending request to %s", c.address[0])
 	req, err := http.NewRequest("POST", c.address[0], bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -75,9 +75,10 @@ func NewHttpServer(port int, onRequest func(body []byte)) *HttpServer {
 			io.WriteString(w, "Success\n")
 		}
 	}
+	mux := http.NewServeMux()
 
-	http.HandleFunc("/", handler)
+	mux.HandleFunc("/", handler)
 
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), nil))
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), mux))
 	return nil
 }

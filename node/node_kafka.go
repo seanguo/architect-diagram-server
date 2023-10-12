@@ -47,13 +47,18 @@ func (k *KafkaProducer) Stop() {
 	}
 }
 
+func (k *KafkaProducer) OnEvent(event string, eventSource string) {
+	l.Infof("got event %s from source: %s", event, eventSource)
+	k.Execute()
+}
+
 func (k *KafkaProducer) Execute() error {
 	l.Infof("producer is executed")
 	if k.producer == nil {
 		return errors.New("producer is not connected to server")
 	}
 	l.Infof("producer is producing")
-	return k.producer.Produce("test1")
+	return k.producer.Produce(k.generateMessage())
 }
 
 func (k *KafkaProducer) Update(propName, propValue string) {
@@ -155,18 +160,34 @@ func (k *KafkaConsumer) Update(propName, propValue string) {
 }
 
 func (k *KafkaConsumer) OnConnect(node Node) error {
-	if k.consumer != nil {
-		err := errors.New("consumer is already connected")
-		l.Errorf("%s", err)
-		return err
-	}
-	ks, ok := node.(*KafkaServer)
-	if ok {
+	switch node.(type) {
+	case *KafkaServer:
+		if k.consumer != nil {
+			err := errors.New("consumer is already connected")
+			l.Errorf("%s", err)
+			return err
+		}
 		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC, k.props["consumerGroup"])
 		l.Infof("consumer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
 		k.Start()
-	} else {
-		err := fmt.Errorf("can't connect Kafka consumer to %v", ks)
+	case *RestServer:
+		if k.pair != nil {
+			err := errors.New("consumer is already connected to one server")
+			l.Errorf("%s", err)
+			return err
+		}
+		// create related producer node
+		producer := NewRestProducer(REST_PRODUCER, "pair-"+k.GetID())
+		el, ok := producer.(NodeEventListener)
+		if ok {
+			// add node as event listner
+			k.AddEventListener(el)
+			k.pair = producer
+			// connect producer to Kafka server
+			producer.OnConnect(node)
+		}
+	default:
+		err := fmt.Errorf("can't connect Kafka consumer to %v", node)
 		l.Errorf("%s", err)
 		return err
 	}

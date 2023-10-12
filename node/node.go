@@ -2,6 +2,7 @@ package node
 
 import (
 	"log"
+	"strconv"
 
 	"go.uber.org/zap"
 )
@@ -55,7 +56,14 @@ type NodeEventSource interface {
 
 type BaseNode struct {
 	ID             string `json:"id"`
+	pair           Node
 	eventListeners []NodeEventListener
+	executions     int
+}
+
+func (k *BaseNode) generateMessage() string {
+	k.executions++
+	return k.ID + "-test-" + strconv.Itoa(k.executions)
 }
 
 func (k *BaseNode) GetID() string {
