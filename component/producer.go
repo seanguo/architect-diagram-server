@@ -2,9 +2,10 @@ package component
 
 import (
 	"context"
+	"log"
+
 	"github.com/segmentio/kafka-go"
 	"go.uber.org/zap"
-	"log"
 )
 
 var l *zap.SugaredLogger
@@ -43,6 +44,10 @@ func NewKafkaProducer(address string, topic string) *KafkaProducer {
 	}
 	producer.initialize()
 	return producer
+}
+
+func (k *KafkaProducer) Topic() string {
+	return k.topic
 }
 
 func (k *KafkaProducer) Produce(content string) error {

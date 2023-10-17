@@ -163,9 +163,12 @@ func (c *Controller) processCommand(message *transport.Message, conn *websocket.
 				_ = sendReport("can't find node: "+cmd.Target, conn, "")
 				return
 			}
-			consumerGroup := cmd.Params["consumerGroup"]
-			l.Infof("updating node[%s] consumerGroup to %s", node.GetID(), consumerGroup)
-			node.Update("consumerGroup", consumerGroup)
+			if len(cmd.Params) > 0 {
+				for k, v := range cmd.Params {
+					l.Infof("updating node[%s]'s %s to %s", node.GetID(), k, v)
+					node.Update(k, v)
+				}
+			}
 		}
 	case transport.EXECUTE:
 		{

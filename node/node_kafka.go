@@ -21,6 +21,7 @@ func init() {
 
 type KafkaProducer struct {
 	BaseNode
+	topic    string
 	producer *component.KafkaProducer
 }
 
@@ -30,6 +31,7 @@ func NewKafkaProducer(t Type, id string) Node {
 			ID:             id,
 			eventListeners: make([]NodeEventListener, 0),
 		},
+		topic: DEFAULT_KAFKA_TOPIC,
 	}
 }
 
@@ -62,6 +64,15 @@ func (k *KafkaProducer) Execute() error {
 }
 
 func (k *KafkaProducer) Update(propName, propValue string) {
+	if "topic" == propName && k.topic != propValue {
+		l.Infof("updating producer's topic from %s to %s", k.topic, propValue)
+		k.topic = propValue
+		if k.producer != nil {
+			k.producer.Close()
+			k.producer = component.NewKafkaProducer(DEFAULT_KAFKA_ADDRESS, propValue)
+			l.Infof("producer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, propValue)
+		}
+	}
 }
 
 func (k *KafkaProducer) OnConnect(node Node) error {
@@ -73,8 +84,8 @@ func (k *KafkaProducer) OnConnect(node Node) error {
 	}
 	ks, ok := node.(*KafkaServer)
 	if ok {
-		k.producer = component.NewKafkaProducer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
-		l.Infof("producer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
+		k.producer = component.NewKafkaProducer(DEFAULT_KAFKA_ADDRESS, k.topic)
+		l.Infof("producer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, k.topic)
 	} else {
 		err = fmt.Errorf("can't connect Kafka producer to %v", ks)
 		l.Errorf("%s", err)
@@ -100,9 +111,12 @@ func NewKafkaConsumer(t Type, id string) Node {
 		// messages: make(chan string, 1),
 		done:     make(chan bool, 1),
 		shutdown: make(chan bool),
-		props:    make(map[string]string),
+		props: map[string]string{
+			"consumerGroup": DEFAULT_KAFKA_CONSUMER_GROUP,
+			"topic":         DEFAULT_KAFKA_TOPIC,
+		},
 	}
-	consumer.props["consumerGroup"] = DEFAULT_KAFKA_CONSUMER_GROUP
+
 	return consumer
 }
 
@@ -149,14 +163,17 @@ func (k *KafkaConsumer) Execute() error {
 }
 
 func (k *KafkaConsumer) Update(propName, propValue string) {
-	l.Infof("consumer is updating node[%s]'s %s to %s", k.ID, propName, propValue)
+	if k.props[propName] == propValue {
+		return
+	}
+	l.Infof("consumer is updating node[%s]'s %s from %s to %s", k.ID, propName, k.props[propName], propValue)
+	k.props[propName] = propValue
 	if k.consumer != nil {
 		k.Stop()
-		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC, propValue)
-		l.Infof("consumer reconnected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
+		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, k.props["topic"], k.props["consumerGroup"])
+		l.Infof("consumer reconnected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, k.props["topic"])
 		k.Start()
 	}
-	k.props[propName] = propValue
 }
 
 func (k *KafkaConsumer) OnConnect(node Node) error {
@@ -167,8 +184,8 @@ func (k *KafkaConsumer) OnConnect(node Node) error {
 			l.Errorf("%s", err)
 			return err
 		}
-		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC, k.props["consumerGroup"])
-		l.Infof("consumer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, DEFAULT_KAFKA_TOPIC)
+		k.consumer = component.NewKafkaConsumer(DEFAULT_KAFKA_ADDRESS, k.props["topic"], k.props["consumerGroup"])
+		l.Infof("consumer connected to server %s of topic %s", DEFAULT_KAFKA_ADDRESS, k.props["topic"])
 		k.Start()
 	case *RestServer:
 		if k.pair != nil {
